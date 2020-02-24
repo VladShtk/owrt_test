@@ -1,0 +1,60 @@
+kind: pipeline
+name: build
+
+trigger:
+  event:
+  - push
+  - tag
+
+steps:
+- name: build
+  image: debian:buster-slim
+  environment:
+    SONAR_WRAPPER_URL: https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip
+  commands:
+  - mkdir bw-output
+  - apt update && apt install -y build-essential --no-install-suggests
+  - apt-get install tree -y
+  - apt-get install wget -y
+  - apt-get install unzip -y
+  - apt-get install git -y
+  - apt-get install bzip2 -y
+  - apt-get install libbz2-dev -y
+  - apt-get install libconfig-dev -y
+  - apt-get install libmodbus-dev -y
+  - apt-get install libmbedtls-dev -y
+  - apt-get install libmosquitto-dev -y
+  - apt-get install -y curl xz-utils subversion build-essential libncurses5-dev zlib1g-dev gawk gcc-multilib flex gettext libssl-dev time python python3 python3-distutils file autoconf&& rm -rf /var/lib/apt/lists/*
+  - wget -O build-wrapper.zip $SONAR_WRAPPER_URL
+  - unzip -d /drone/src /drone/src/build-wrapper.zip
+  - export PATH=$PATH:/drone/src/build-wrapper-linux-x86
+  - cp ./build-wrapper-linux-x86/libinterceptor-x86_64.so ./build-wrapper-linux-x86/libinterceptor-haswell.so
+  - ./source.sh
+  #- build-wrapper-linux-x86-64 --out-dir bw-output make -C ./src -f makefile_linux
+  - tree bin/packages
+
+- name: static-analysis
+  image: debian:buster-slim
+  environment:
+    SONAR_SCANNER_VER: 4.2.0.1873
+    SONAR_SCANNER_URL: https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli
+  secrets: [sonar_host, sonar_token]
+  commands:
+    # if branch name like "%/%" and tag is empty, get variant name from "%/"
+    - if echo $DRONE_BRANCH | grep -q / && [ -z $DRONE_TAG ]; then export DRONE_TAG=$(echo ${DRONE_BRANCH%%/*} | tr a-z A-Z); fi
+    
+    # sonarqube static analysis
+    - mkdir -p /usr/share/man/man1
+    - apt update && apt-get install -y default-jre-headless --no-install-suggests
+    - apt-get install aria2 -y
+    - apt-get install tree -y
+    - apt-get install unzip -y
+    - cd /drone/src
+    - aria2c -x 3 -q -d /drone/src -o sonar-scanner.zip $${SONAR_SCANNER_URL}-$${SONAR_SCANNER_VER}.zip
+    - unzip -d /drone/src /drone/src/sonar-scanner.zip
+    - export PATH=$PATH:/drone/src/sonar-scanner-$SONAR_SCANNER_VER/bin
+    - useradd sonar
+    - mkdir /home/sonar
+    - chown -R sonar /home/sonar 
+    - chown -R sonar /drone/src
+    - su sonar -c 'sonar-scanner -Dsonar.cfamily.build-wrapper-output=bw-output -Dsonar.cfamily.threads=$(nproc) -Dsonar.sources=src -Dsonar.branch.name=${DRONE_BRANCH} -Dsonar.projectKey=${DRONE_REPO_OWNER}_${DRONE_REPO_NAME} -Dsonar.organization=${DRONE_REPO_OWNER,,} -Dsonar.host.url=https://sonarcloud.io -Dsonar.login=1aa63b300439e02ebcf54017b51619dc0e024e13'
