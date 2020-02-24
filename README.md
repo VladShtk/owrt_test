@@ -1,4 +1,4 @@
-### ToolSense OpenWrt module
+### ToolSense OpenWrt module test
 
 #### I. Program description
 
